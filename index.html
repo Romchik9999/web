@@ -1875,43 +1875,73 @@
                 if (productField) productField.value = '';
             }
 
-            // Form submissions
-            function sendData(e) {
+            // Form submissions (Отправка в Telegram)
+            const TELEGRAM_TOKEN = '8833902889:AAHYpULmYkPZFlIcaDUGq0yfC7a8plkv-uw'; // <-- Вставь токен
+            const CHAT_ID = '1816677385'; // <-- Вставь ID
+
+            function sendToTelegram(e) {
                 e.preventDefault();
                 const form = e.currentTarget;
-                
-                // Собираем данные из формы
                 const formData = new FormData(form);
-                const data = Object.fromEntries(formData.entries());
 
-                // Отправляем данные на сервер
-                fetch('api/save.php', {
+                // Собираем красивое сообщение для Telegram
+                let message = `🔔 <b>Новая заявка с сайта!</b>\n\n`;
+                message += `👤 <b>Имя:</b> ${formData.get('name')}\n`;
+                message += `📞 <b>Телефон:</b> ${formData.get('phone')}\n`;
+                
+                const product = formData.get('product') || formData.get('type');
+                if (product) {
+                    message += `📦 <b>Интерес:</b> ${product}\n`;
+                }
+                
+                const comment = formData.get('message');
+                if (comment) {
+                    message += `💬 <b>Комментарий:</b> ${comment}\n`;
+                }
+
+                // URL для отправки в API Telegram
+                const apiUrl = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+
+                // Меняем текст кнопки на время отправки
+                const submitBtn = form.querySelector('button[type="submit"]');
+                const originalBtnText = submitBtn.textContent;
+                submitBtn.textContent = 'Отправка...';
+                submitBtn.disabled = true;
+
+                // Отправляем запрос
+                fetch(apiUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(data)
+                    body: JSON.stringify({
+                        chat_id: CHAT_ID,
+                        text: message,
+                        parse_mode: 'HTML' // Чтобы работало выделение жирным
+                    })
                 })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.status === 'success') {
+                .then(response => {
+                    submitBtn.textContent = originalBtnText;
+                    submitBtn.disabled = false;
+                    
+                    if (response.ok) {
                         resetForm(form);
-                        if (form.id === 'leadForm') {
-                            closeModal();
-                        }
+                        if (form.id === 'leadForm') closeModal();
                         showToast();
                     } else {
-                        alert('Произошла ошибка при отправке. Попробуйте еще раз.');
+                        alert('Произошла ошибка на стороне сервера Telegram.');
                     }
                 })
                 .catch(error => {
+                    submitBtn.textContent = originalBtnText;
+                    submitBtn.disabled = false;
                     console.error('Ошибка:', error);
-                    alert('Ошибка соединения. Пожалуйста, проверьте интернет.');
+                    alert('Не удалось отправить заявку. Проверьте подключение к интернету.');
                 });
             }
 
-            document.getElementById('leadForm').addEventListener('submit', sendData);
-            document.getElementById('quickForm').addEventListener('submit', sendData);
+            document.getElementById('leadForm').addEventListener('submit', sendToTelegram);
+            document.getElementById('quickForm').addEventListener('submit', sendToTelegram);
 
         })();
     </script>
