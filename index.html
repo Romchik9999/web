@@ -1,132 +1,21 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""Voice2Text — сервер: сайт, регистрация, подписка 99,99₽/мес, скачивание приложения."""
-import hashlib, html, os, secrets, sqlite3
-from datetime import datetime, timedelta
-from flask import (Flask, request, jsonify, render_template_string,
-                   redirect, session, send_from_directory)
-
-ADMIN_KEY = os.environ.get("ADMIN_KEY", "СМЕНИ_МЕНЯ_АДМИН_КЛЮЧ")
-PAY_DETAILS = os.environ.get("PAY_DETAILS", "Карта / СБП: 0000 0000 0000 0000, получатель Иван")
-PRICE = "99,99 ₽"
-TRIAL_DAYS = 1
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(BASE_DIR, "users.db")
-DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
-EXE_NAME = "Voice2Text.exe"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-app = Flask(__name__)
-app.secret_key = secrets.token_hex(16)
-
-def q(sql, args=(), one=False):
-    con = sqlite3.connect(DB); con.row_factory = sqlite3.Row
-    try:
-        cur = con.execute(sql, args); con.commit()
-        rows = cur.fetchall()
-        return (rows[0] if rows else None) if one else rows
-    finally:
-        con.close()
-
-q("""CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,
-    login TEXT UNIQUE, hash TEXT, salt TEXT, token TEXT, sub_until TEXT, created TEXT)""")
-q("""CREATE TABLE IF NOT EXISTS pays(id INTEGER PRIMARY KEY AUTOINCREMENT,
-    login TEXT, code TEXT, status TEXT, created TEXT)""")
-
-def _hash(pwd, salt): return hashlib.sha256(salt + pwd.encode()).hexdigest()
-def esc(s): return html.escape(str(s or ""))
-def now(): return datetime.now()
-
-def exe_info():
-    path = os.path.join(DOWNLOAD_DIR, EXE_NAME)
-    if not os.path.exists(path):
-        return None
-    return {"size": os.path.getsize(path) / 1e6,
-            "date": datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d.%m.%Y")}
-
-def status_of(row):
-    until = row["sub_until"]
-    active = bool(until) and datetime.fromisoformat(until) > now()
-    return {"active": active, "until": until, "login": row["login"]}
-
-def user_by_token(t):
-    return q("SELECT * FROM users WHERE token=?", (t or "",), one=True)
-
-# ---------- API ----------
-@app.get("/ping")
-def ping(): return jsonify(ok=True)
-
-@app.post("/api/register")
-def api_register():
-    d = request.json or {}
-    login, pwd = (d.get("login") or "").strip(), d.get("password") or ""
-    if len(login) < 3: return jsonify(error="Логин — минимум 3 символа"), 400
-    if len(pwd) < 4: return jsonify(error="Пароль — минимум 4 символа"), 400
-    salt, token = secrets.token_hex(16), secrets.token_hex(24)
-    until = (now() + timedelta(days=TRIAL_DAYS)).isoformat() if TRIAL_DAYS else None
-    try:
-        q("INSERT INTO users(login,hash,salt,token,sub_until,created) VALUES(?,?,?,?,?,?)",
-          (login, _hash(pwd, bytes.fromhex(salt)), salt, token, until, now().isoformat()))
-    except sqlite3.IntegrityError:
-        return jsonify(error="Этот логин уже занят"), 400
-    return jsonify(token=token, active=until is not None, until=until, login=login)
-
-@app.post("/api/login")
-def api_login():
-    d = request.json or {}
-    row = q("SELECT * FROM users WHERE login=?", ((d.get("login") or "").strip(),), one=True)
-    if not row: return jsonify(error="Пользователь не найден"), 400
-    if row["hash"] != _hash(d.get("password") or "", bytes.fromhex(row["salt"])):
-        return jsonify(error="Неверный пароль"), 400
-    return jsonify(token=row["token"], **status_of(row))
-
-@app.get("/api/status")
-def api_status():
-    row = user_by_token(request.args.get("token"))
-    if not row: return jsonify(error="bad token"), 401
-    return jsonify(**status_of(row))
-
-@app.post("/api/pay")
-def api_pay():
-    row = user_by_token((request.json or {}).get("token"))
-    if not row: return jsonify(error="bad token"), 401
-    code = secrets.token_hex(4).upper()
-    q("INSERT INTO pays(login,code,status,created) VALUES(?,?,?,?)",
-      (row["login"], code, "pending", now().isoformat()))
-    return jsonify(code=code, details=PAY_DETAILS, price=PRICE)
-
-@app.post("/api/admin/activate")
-def admin_activate():
-    d = request.json or {}
-    if d.get("key") != ADMIN_KEY: return jsonify(error="forbidden"), 403
-    row = q("SELECT * FROM users WHERE login=?", (d.get("login"),), one=True)
-    if not row: return jsonify(error="no user"), 404
-    base = max(now(), datetime.fromisoformat(row["sub_until"])) if row["sub_until"] else now()
-    until = (base + timedelta(days=int(d.get("days", 30)))).isoformat()
-    q("UPDATE users SET sub_until=? WHERE login=?", (until, d.get("login")))
-    return jsonify(ok=True, until=until)
-
-# ---------- СКАЧИВАНИЕ ----------
-@app.get("/download")
-def download():
-    info = exe_info()
-    if not info:
-        return page("<div class=box><h2>Файл скоро появится</h2>"
-                    "<p class=small>Администратор ещё не загрузил установщик.</p></div>")
-    return send_from_directory(DOWNLOAD_DIR, EXE_NAME, as_attachment=True)
-
-# ---------- САЙТ ----------
-BASE = """<!doctype html><html lang=ru><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>Voice2Text — голос в текст</title><style>
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voice2Text — голос в текст</title>
+<style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',sans-serif}
 body{background:#101114;color:#e8e9ec}
 .wrap{max-width:860px;margin:0 auto;padding:24px}
 .nav{display:flex;justify-content:space-between;align-items:center;padding:8px 0 24px}
-.nav a{color:#8b8f98;text-decoration:none;margin-left:16px}.nav a:hover{color:#fff}
+.nav a{color:#8b8f98;text-decoration:none;margin-left:16px;cursor:pointer}.nav a:hover{color:#fff}
 h1{font-size:40px;line-height:1.1;margin:24px 0 12px}
 h1 b{color:#ff2d55}
+h2{margin-bottom:16px}
+h3{margin:16px 0 8px}
 p.lead{color:#8b8f98;font-size:16px;max-width:560px}
+.view{display:none}.view.on{display:block}
 .price{display:inline-block;background:#22242a;border:2px solid #ff2d55;border-radius:20px;
 padding:24px 32px;margin:28px 0;text-align:center}
 .price .p{font-size:40px;font-weight:800}.price .per{color:#8b8f98;margin:4px 0 16px}
@@ -141,166 +30,210 @@ padding:12px 26px;font-size:15px;font-weight:600;text-decoration:none;margin-lef
 .card b{color:#ff2d55}
 .note{color:#8b8f98;font-size:13px;margin:16px 0}
 .box{background:#22242a;border-radius:16px;padding:24px;max-width:420px;margin:40px auto}
-.box h2{margin-bottom:16px}
 input{width:100%;background:#17181c;border:2px solid #3a3d46;border-radius:10px;
 padding:11px 12px;color:#fff;font-size:14px;margin-bottom:12px}
 input:focus{outline:none;border-color:#ff2d55}
 .err{color:#ff6b81;font-size:13px;margin-bottom:10px}
-.ok{color:#7ee787;font-size:13px;margin-bottom:10px}
+.ok{color:#7ee787;font-size:13px;margin:10px 0}
 table{width:100%;border-collapse:collapse;margin:12px 0}
 td,th{padding:8px 10px;border-bottom:1px solid #2a2c33;text-align:left;font-size:14px}
 .small{color:#8b8f98;font-size:12px}
-</style></head><body><div class=wrap>
-<div class=nav><b>🎙 Voice2Text</b><span><a href=/download>Скачать</a>
-<a href=/account>Кабинет</a><a href=/login>Вход</a><a href=/register>Регистрация</a></span></div>
-{{ content|safe }}</div></body></html>"""
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav"><b>🎙 Voice2Text</b><span>
+    <a onclick="return go('home')">Главная</a>
+    <a id="dl-nav" href="/download">Скачать</a>
+    <a onclick="return go('account')">Кабинет</a>
+    <a onclick="return go('admin')">Админ</a>
+  </span></div>
 
-def page(content): return render_template_string(BASE, content=content)
+  <!-- ГЛАВНАЯ -->
+  <div id="view-home" class="view on">
+    <h1>Голос → текст <b>в одно нажатие</b></h1>
+    <p class="lead">Диктовка в любом окне компьютера. Распознавание на твоём ПК,
+    вставка куда угодно, горячая клавиша на твой выбор.</p>
+    <div class="price"><div class="p">99,99 ₽</div><div class="per">в месяц</div>
+      <a class="btn" onclick="return go('register')">Зарегистрироваться</a>
+      <a class="btn2" onclick="return go('login')">Войти</a></div>
+    <div><a class="btn2" id="dl" href="/download">⬇ Скачать для Windows</a></div>
+    <div class="cards">
+      <div class="card"><b>⚡ Мгновенно</b><br>Транскрипция за сотые доли секунды</div>
+      <div class="card"><b>🔒 Приватно</b><br>Речь распознаётся на твоём ПК</div>
+      <div class="card"><b>🌐 Подписка</b><br>Аккаунт и проверка через интернет</div>
+    </div>
+    <p class="note">Приложению нужен интернет для проверки подписки. Без интернета диктовка не работает.</p>
+  </div>
 
-def dl_button():
-    info = exe_info()
-    if not info:
-        return '<p class=note>Установщик для Windows скоро появится.</p>'
-    return (f'<a class=btn2 href=/download>⬇ Скачать для Windows '
-            f'({info["size"]:.0f} МБ)</a>'
-            f'<p class=note>Обновлено {info["date"]} · Нужны аккаунт и подписка 99,99 ₽/мес</p>')
+  <!-- РЕГИСТРАЦИЯ -->
+  <div id="view-register" class="view">
+    <div class="box"><h2>Регистрация</h2>
+      <div class="err" id="reg-err"></div>
+      <form id="reg-form">
+        <input id="reg-login" placeholder="Логин">
+        <input id="reg-pass" type="password" placeholder="Пароль">
+        <input id="reg-pass2" type="password" placeholder="Повтори пароль">
+        <button class="btn" style="width:100%">Создать аккаунт</button>
+      </form>
+      <p class="small" style="margin-top:12px">Уже есть аккаунт?
+        <a style="color:#ff2d55" onclick="return go('login')">Войти</a></p>
+    </div>
+  </div>
 
-@app.get("/")
-def index():
-    return page(f"""
-<h1>Голос → текст <b>в одно нажатие</b></h1>
-<p class=lead>Диктовка в любом окне компьютера. Распознавание на твоём ПК,
-вставка куда угодно, горячая клавиша на твой выбор.</p>
-<div class=price><div class=p>{PRICE}</div><div class=per>в месяц</div>
-<a class=btn href=/register>Зарегистрироваться</a><a class=btn2 href=/login>Войти</a></div>
-<div>{dl_button()}</div>
-<div class=cards>
-<div class=card><b>⚡ Мгновенно</b><br>Транскрипция за сотые доли секунды</div>
-<div class=card><b>🔒 Приватно</b><br>Речь распознаётся на твоём ПК</div>
-<div class=card><b>🌐 Подписка</b><br>Аккаунт и проверка через интернет</div></div>
-<p class=note>Приложению нужен интернет для проверки подписки. Без интернета диктовка не работает.</p>""")
+  <!-- ВХОД -->
+  <div id="view-login" class="view">
+    <div class="box"><h2>Вход</h2>
+      <div class="err" id="log-err"></div>
+      <form id="log-form">
+        <input id="log-login" placeholder="Логин">
+        <input id="log-pass" type="password" placeholder="Пароль">
+        <button class="btn" style="width:100%">Войти</button>
+      </form>
+      <p class="small" style="margin-top:12px">Нет аккаунта?
+        <a style="color:#ff2d55" onclick="return go('register')">Создать</a></p>
+    </div>
+  </div>
 
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    err = ""
-    if request.method == "POST":
-        login, pwd, pwd2 = (request.form.get("login") or "").strip(), \
-            request.form.get("password") or "", request.form.get("password2") or ""
-        if len(login) < 3: err = "Логин — минимум 3 символа"
-        elif len(pwd) < 4: err = "Пароль — минимум 4 символа"
-        elif pwd != pwd2: err = "Пароли не совпадают"
-        else:
-            salt, token = secrets.token_hex(16), secrets.token_hex(24)
-            until = (now() + timedelta(days=TRIAL_DAYS)).isoformat() if TRIAL_DAYS else None
-            try:
-                q("INSERT INTO users(login,hash,salt,token,sub_until,created) VALUES(?,?,?,?,?,?)",
-                  (login, _hash(pwd, bytes.fromhex(salt)), salt, token, until, now().isoformat()))
-                session["token"] = token
-                return redirect("/account")
-            except sqlite3.IntegrityError:
-                err = "Этот логин уже занят"
-    return page(f"""<div class=box><h2>Регистрация</h2>
-    {"<div class=err>"+esc(err)+"</div>" if err else ""}
-    <form method=post><input name=login placeholder=Логин>
-    <input type=password name=password placeholder=Пароль>
-    <input type=password name=password2 placeholder=Повтори пароль>
-    <button class=btn style=width:100%>Создать аккаунт</button></form>
-    <p class=small style=margin-top:12px>Уже есть аккаунт? <a href=/login style=color:#ff2d55>Войти</a></p></div>""")
+  <!-- КАБИНЕТ -->
+  <div id="view-account" class="view"><div class="box" id="acc-body">Загрузка…</div></div>
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    err = ""
-    if request.method == "POST":
-        row = q("SELECT * FROM users WHERE login=?",
-                ((request.form.get("login") or "").strip(),), one=True)
-        if not row or row["hash"] != _hash(request.form.get("password") or "",
-                                           bytes.fromhex(row["salt"])):
-            err = "Неверный логин или пароль"
-        else:
-            session["token"] = row["token"]
-            return redirect("/account")
-    return page(f"""<div class=box><h2>Вход</h2>
-    {"<div class=err>"+esc(err)+"</div>" if err else ""}
-    <form method=post><input name=login placeholder=Логин>
-    <input type=password name=password placeholder=Пароль>
-    <button class=btn style=width:100%>Войти</button></form></div>""")
+  <!-- АДМИН -->
+  <div id="view-admin" class="view">
+    <div class="box" style="max-width:640px">
+      <h2>Админка</h2>
+      <form id="admin-form"><input id="admin-key" type="password" placeholder="Админ-ключ">
+        <button class="btn" style="width:100%">Войти</button></form>
+      <div id="admin-body"></div>
+    </div>
+  </div>
+</div>
 
-@app.get("/logout")
-def logout():
-    session.pop("token", None); return redirect("/")
+<script>
+// Если открываешь файл отдельно от сервера — вставь адрес: const SERVER = "https://ТВОЙ-ЛОГИН.pythonanywhere.com";
+const SERVER = "";
+let TOKEN = localStorage.getItem("v2t_token") || "";
+let AKEY = sessionStorage.getItem("v2t_admin") || "";
+const $ = id => document.getElementById(id);
 
-@app.route("/account", methods=["GET", "POST"])
-def account():
-    row = user_by_token(session.get("token"))
-    if not row: return redirect("/login")
-    if request.method == "POST":
-        code = secrets.token_hex(4).upper()
-        q("INSERT INTO pays(login,code,status,created) VALUES(?,?,?,?)",
-          (row["login"], code, "pending", now().isoformat()))
-        return redirect("/account")
-    st = status_of(row)
-    pend = q("SELECT * FROM pays WHERE login=? AND status='pending' ORDER BY id DESC LIMIT 1",
-             (row["login"],), one=True)
-    if st["active"]:
-        block = f"""<div class=ok>✔ Подписка активна до
-        {datetime.fromisoformat(st['until']).strftime('%d.%m.%Y %H:%M')}</div>"""
-    else:
-        block = f"""<div class=err>Подписка не активна</div>
-        <p class=small>1. Переведи {PRICE} на: <b>{esc(PAY_DETAILS)}</b><br>
-        2. Нажми кнопку ниже — создастся заявка с кодом.<br>
-        3. После подтверждения админом нажми «Проверить подписку» в приложении.</p>
-        <form method=post style=margin-top:12px><button class=btn>Я оплатил — создать заявку</button></form>
-        {f"<p class=ok style=margin-top:10px>Заявка <b>{esc(pend['code'])}</b> ожидает подтверждения</p>" if pend else ""}"""
-    return page(f"""<div class=box><h2>Кабинет: {esc(row['login'])}</h2>
-    {block}{dl_button()}
-    <p class=small style=margin-top:14px><a href=/logout style=color:#8b8f98>Выйти</a></p></div>""")
+async function api(path, data){
+  const r = await fetch(SERVER + path, data !== undefined ? {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(data) } : {});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Ошибка сервера");
+  return j;
+}
+function go(name){
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("on"));
+  $("view-" + name).classList.add("on");
+  if (name === "account") loadAccount();
+  if (name === "admin" && AKEY) loadAdmin();
+  return false;
+}
+const fmt = s => new Date(s).toLocaleString("ru-RU",
+  {day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"});
 
-@app.route("/admin", methods=["GET", "POST"])
-def admin():
-    if request.method == "POST":
-        if request.form.get("key") == ADMIN_KEY:
-            session["admin"] = True
-        act = request.form.get("act")
-        if session.get("admin"):
-            if act == "approve":
-                p = q("SELECT * FROM pays WHERE id=?", (request.form.get("id"),), one=True)
-                if p and p["status"] == "pending":
-                    row = q("SELECT * FROM users WHERE login=?", (p["login"],), one=True)
-                    base = max(now(), datetime.fromisoformat(row["sub_until"])) \
-                        if row["sub_until"] else now()
-                    q("UPDATE users SET sub_until=? WHERE login=?",
-                      ((base + timedelta(days=30)).isoformat(), p["login"]))
-                    q("UPDATE pays SET status='approved' WHERE id=?", (p["id"],))
-            if act == "give":
-                row = q("SELECT * FROM users WHERE login=?",
-                        (request.form.get("login"),), one=True)
-                if row:
-                    base = max(now(), datetime.fromisoformat(row["sub_until"])) \
-                        if row["sub_until"] else now()
-                    q("UPDATE users SET sub_until=? WHERE login=?",
-                      ((base + timedelta(days=int(request.form.get("days", 30)))).isoformat(),
-                       row["login"]))
-        return redirect("/admin")
-    if not session.get("admin"):
-        return page("""<div class=box><h2>Админка</h2><form method=post>
-        <input type=password name=key placeholder=Админ-ключ>
-        <button class=btn style=width:100%>Войти</button></form></div>""")
-    pends = q("SELECT * FROM pays WHERE status='pending' ORDER BY id")
-    rows = "".join(f"<tr><td>{esc(p['login'])}</td><td>{p['code']}</td>"
-                   f"<td><form method=post><input type=hidden name=act value=approve>"
-                   f"<input type=hidden name=id value={p['id']}>"
-                   f"<button class=btn>+30 дней</button></form></td></tr>" for p in pends)
-    info = exe_info()
-    exe_row = (f"✔ {EXE_NAME} · {info['size']:.0f} МБ · от {info['date']}" if info
-               else "✖ файл не загружен — положи его в папку downloads рядом с server.py")
-    return page(f"""<h2>Админка</h2>
-    <h3 style=margin:16px 0 8px>Установщик на сайте</h3><p class=small>{exe_row}</p>
-    <h3 style=margin:16px 0 8px>Заявки на оплату</h3>
-    <table><tr><th>Логин</th><th>Код</th><th></th></tr>{rows or '<tr><td colspan=3 class=small>пусто</td></tr>'}</table>
-    <h3 style=margin:16px 0 8px>Выдать подписку вручную</h3>
-    <form method=post style=display:flex;gap:8px><input type=hidden name=act value=give>
-    <input name=login placeholder=Логин style=margin:0><input name=days value=30 style=margin:0;width:80px>
-    <button class=btn>Выдать</button></form>""")
+// размер exe на главной
+api("/api/appinfo").then(i => { if (i.ready) {
+  $("dl").textContent = `⬇ Скачать для Windows (${i.size} МБ)`;
+  $("dl-nav").textContent = "Скачать";
+}}).catch(() => {});
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+// регистрация
+$("reg-form").onsubmit = async e => {
+  e.preventDefault();
+  const el = $("reg-err"); el.textContent = "";
+  if ($("reg-pass").value !== $("reg-pass2").value) { el.textContent = "Пароли не совпадают"; return; }
+  try {
+    const j = await api("/api/register",
+      { login: $("reg-login").value.trim(), password: $("reg-pass").value });
+    TOKEN = j.token; localStorage.setItem("v2t_token", TOKEN); go("account");
+  } catch (ex) { el.textContent = ex.message; }
+};
+
+// вход
+$("log-form").onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const j = await api("/api/login",
+      { login: $("log-login").value.trim(), password: $("log-pass").value });
+    TOKEN = j.token; localStorage.setItem("v2t_token", TOKEN); go("account");
+  } catch (ex) { $("log-err").textContent = ex.message; }
+};
+
+function logout(){ TOKEN = ""; localStorage.removeItem("v2t_token"); return go("home"); }
+
+// кабинет
+async function loadAccount(){
+  const body = $("acc-body");
+  if (!TOKEN) return go("login");
+  try {
+    const st = await api("/api/status?token=" + encodeURIComponent(TOKEN));
+    const pi = await api("/api/payinfo");
+    let html = `<h2>Кабинет: ${st.login}</h2>`;
+    if (st.active) {
+      html += `<div class="ok">✔ Подписка активна до ${fmt(st.until)}</div>
+        <a class="btn" href="${SERVER}/download">⬇ Скачать приложение</a>`;
+    } else {
+      html += `<div class="err">Подписка не активна</div>
+        <p class="small">1. Переведи ${pi.price} на: <b>${pi.details}</b><br>
+        2. Нажми «Я оплатил» — появится код заявки.<br>
+        3. После подтверждения админом нажми «Проверить».</p>
+        <button class="btn" onclick="pay()">Я оплатил — создать заявку</button>
+        <button class="btn2" onclick="loadAccount()">Проверить</button>
+        <div class="ok" id="pay-code"></div>`;
+    }
+    html += `<p class="small" style="margin-top:14px"><a onclick="return logout()">Выйти</a></p>`;
+    body.innerHTML = html;
+  } catch (ex) {
+    body.innerHTML = `<div class="err">${ex.message}</div>
+      <button class="btn2" onclick="logout()">Войти заново</button>`;
+  }
+}
+async function pay(){
+  try {
+    const j = await api("/api/pay", { token: TOKEN });
+    $("pay-code").innerHTML = `Заявка <b>${j.code}</b> создана и ожидает подтверждения`;
+  } catch (e) { alert(e.message); }
+}
+
+// админка
+$("admin-form").onsubmit = e => {
+  e.preventDefault();
+  AKEY = $("admin-key").value.trim();
+  sessionStorage.setItem("v2t_admin", AKEY);
+  loadAdmin();
+};
+async function loadAdmin(){
+  const box = $("admin-body");
+  try {
+    const list = await api("/api/admin/pending?key=" + encodeURIComponent(AKEY));
+    const rows = list.map(p => `<tr><td>${p.login}</td><td>${p.code}</td>
+      <td><button class="btn" onclick="approve(${p.id})">+30 дней</button></td></tr>`).join("");
+    box.innerHTML = `<h3>Заявки на оплату</h3>
+      <table><tr><th>Логин</th><th>Код</th><th></th></tr>
+      ${rows || '<tr><td colspan="3" class="small">пусто</td></tr>'}</table>
+      <h3>Выдать подписку вручную</h3>
+      <div style="display:flex;gap:8px">
+        <input id="give-login" placeholder="Логин" style="margin:0">
+        <input id="give-days" value="30" style="margin:0;width:80px">
+        <button class="btn" onclick="give()">Выдать</button></div>`;
+  } catch (e) { box.innerHTML = `<div class="err">${e.message}</div>`; }
+}
+async function approve(id){
+  try { await api("/api/admin/approve", { key: AKEY, id }); loadAdmin(); }
+  catch (e) { alert(e.message); }
+}
+async function give(){
+  try {
+    await api("/api/admin/activate", { key: AKEY,
+      login: $("give-login").value.trim(), days: +$("give-days").value || 30 });
+    alert("Выдано!");
+  } catch (e) { alert(e.message); }
+}
+
+if (TOKEN) go("account");
+</script>
+</body>
+</html>
