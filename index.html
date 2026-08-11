@@ -49,14 +49,16 @@
   input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff3c4,#ffc93e 55%,#a86e12);border:3px solid #3c2606;box-shadow:0 0 16px rgba(255,190,60,.7)}
 
   .meters{margin-top:12px;display:grid;gap:7px}
-  .meter{display:grid;grid-template-columns:66px 1fr;gap:10px;align-items:center}
-  .m-label{font-family:Unbounded;font-weight:700;font-size:8px;color:#c99a5e;letter-spacing:.12em}
+  .meter{display:grid;grid-template-columns:86px 1fr;gap:10px;align-items:center}
+  .m-label{font-family:Unbounded;font-weight:700;font-size:8px;color:#c99a5e;letter-spacing:.12em;white-space:nowrap}
+  .m-label em{font-style:normal;color:#ffd873}
   .bar{position:relative;height:14px;background:#150c05;border:2px solid #4a3414;border-radius:5px;overflow:hidden}
   .bar i{display:block;height:100%;width:0%;
     background:linear-gradient(90deg,#4de0c0,#ffd23e 60%,#ff9d3d);box-shadow:0 0 10px rgba(255,190,80,.4)}
   .bar i.hot{background:linear-gradient(90deg,#ffd23e,#ff7a1c 60%,#ff2f12);box-shadow:0 0 12px rgba(255,90,20,.7)}
   .bar i.flame{background:linear-gradient(90deg,#ffdf6b,#ff8a1e 55%,#ff2f12)}
-  .bar .th{position:absolute;top:-2px;bottom:-2px;left:22%;width:2px;background:#ffe9b0;opacity:.85;z-index:2;box-shadow:0 0 6px #ffd27a}
+  .bar .th{position:absolute;top:-2px;bottom:-2px;left:59%;width:3px;background:#ffe9b0;opacity:.9;z-index:2;
+    box-shadow:0 0 8px #ffd27a;transition:left .12s linear}
   .bar::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 6px,rgba(0,0,0,.4) 6px 8px)}
 
   .deck-right{display:flex;flex-direction:column;gap:10px}
@@ -108,13 +110,13 @@
 <section class="deck">
   <div class="deck-left">
     <div class="label-row">
-      <label for="lever">РЫЧАГ РЁВА</label>
-      <output id="leverOut">0%</output>
+      <label for="lever">РЫЧАГ РЁВА · ПОРОГ, дБ</label>
+      <output id="leverOut">65 дБ</output>
     </div>
-    <input type="range" id="lever" min="0" max="100" value="0" aria-label="Сила пламени">
+    <input type="range" id="lever" min="30" max="100" value="65" aria-label="Порог пробуждения в децибелах">
     <div class="meters">
-      <div class="meter"><span class="m-label">ШУМ</span>
-        <div class="bar"><span class="th"></span><i id="noiseFill"></i></div></div>
+      <div class="meter"><span class="m-label">ШУМ <em id="noiseVal">0</em> дБ</span>
+        <div class="bar"><span class="th" id="thMark"></span><i id="noiseFill"></i></div></div>
       <div class="meter"><span class="m-label">ПЛАМЯ</span>
         <div class="bar"><i id="fireFill" class="flame"></i></div></div>
     </div>
@@ -123,7 +125,7 @@
     <button id="micBtn" class="pbtn">🎤 МИКРОФОН</button>
     <button id="sndBtn" class="pbtn">🔇 ЗВУК</button>
   </div>
-  <p class="hint">шуми, чтобы разбудить · тап по золоту — украсть монетку (рискованно!) · <kbd>ПРОБЕЛ</kbd> — залп огня</p>
+  <p class="hint">рычаг — порог пробуждения в дБ · шум громче порога будит дракона · тап по золоту — монетка · <kbd>ПРОБЕЛ</kbd>/тап — залп огня</p>
 </section>
 
 <script>
@@ -132,8 +134,10 @@
 const cvs=document.getElementById('scene'),ctx=cvs.getContext('2d');
 const $=id=>document.getElementById(id);
 const lever=$('lever'),leverOut=$('leverOut'),noiseFill=$('noiseFill'),fireFill=$('fireFill'),
- micChip=$('micChip'),stateChip=$('stateChip'),coinChip=$('coinChip'),micBtn=$('micBtn'),sndBtn=$('sndBtn');
+ micChip=$('micChip'),stateChip=$('stateChip'),coinChip=$('coinChip'),micBtn=$('micBtn'),
+ sndBtn=$('sndBtn'),thMark=$('thMark'),noiseVal=$('noiseVal');
 
+const DB_MAX=110;
 const clamp=x=>Math.max(0,Math.min(1,x)),lerp=(a,b,u)=>a+(b-a)*u,
  smooth=x=>x*x*(3-2*x),rnd=(a,b)=>a+Math.random()*(b-a);
 
@@ -142,8 +146,7 @@ const LY={},mouth={x:0,y:0,ang:Math.PI},headW={x:0,y:0,r:50};
 let coins=[],tris=[],sparkles=[],zzz=[],flyCoins=[],parts=[];
 const spots=[];for(let i=0;i<8;i++)spots.push({a:rnd(-0.3,2.4),r:rnd(0.35,0.85),s:rnd(0.03,0.06)});
 
-const TH=0.22;
-const state={slider:0,mic:0,inten:0,boost:false,wake:0,wing:0,jaw:0,wakeHold:-1,breath:0,blink:0,blinkAt:4};
+const state={thr:65,micDb:0,inten:0,boost:false,wake:0,wing:0,jaw:0,wakeHold:-1,breath:0,blink:0,blinkAt:4};
 let shake=0,prevHalf=false;
 
 /* ── спрайт монеты ── */
@@ -164,7 +167,6 @@ function resize(){
  g.cx=W*0.5;g.mw=Math.min(W*0.44,g.D*0.95);g.mh=g.D*0.34;
  g.moundTop=g.groundY-g.mh;
  g.R=g.D*0.27;g.bx=g.cx+g.mw*0.06;g.by=g.moundTop+g.R*0.38;g.hr=g.R*0.52;
- // низкополигональные скалы
  tris=[];
  const cols=8,rows=6,gw=W/cols,gh=H/rows,P=[];
  for(let r=0;r<=rows;r++){P[r]=[];
@@ -232,7 +234,7 @@ sndBtn.addEventListener('click',()=>{
  soundOn=!soundOn;sndBtn.classList.toggle('on',soundOn);
  sndBtn.textContent=soundOn?'🔊 ЗВУК: ВКЛ':'🔇 ЗВУК: ВЫКЛ';sndBtn.blur();});
 micBtn.addEventListener('click',async()=>{micBtn.blur();
- if(micOn){micStream&&micStream.getTracks().forEach(tr=>tr.stop());micOn=false;state.mic=0;
+ if(micOn){micStream&&micStream.getTracks().forEach(tr=>tr.stop());micOn=false;state.micDb=0;
   micBtn.classList.remove('on');micChip.classList.remove('on');micChip.textContent='🎤 выкл';return;}
  try{
   micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
@@ -241,8 +243,12 @@ micBtn.addEventListener('click',async()=>{micBtn.blur();
    analyser.fftSize=1024;micBuf=new Uint8Array(analyser.fftSize);s.connect(analyser);}
   micOn=true;micBtn.classList.add('on');micChip.classList.add('on');micChip.textContent='🎤 слушаю';
  }catch(e){micChip.textContent='🎤 нет доступа';}});
-lever.addEventListener('input',()=>{state.slider=+lever.value;leverOut.textContent=lever.value+'%';
- state.wakeHold=Math.max(state.wakeHold,t+2.5);});
+
+/* ── рычаг порога в дБ + белая полоска ── */
+function setThr(v){state.thr=+v;leverOut.textContent=v+' дБ';
+ thMark.style.left=(v/DB_MAX*100)+'%';}
+lever.addEventListener('input',()=>setThr(lever.value));
+setThr(lever.value);
 
 /* ── ввод ── */
 addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();state.boost=true;state.wakeHold=t+1.2;}});
@@ -289,21 +295,23 @@ function stealCoin(x,y){
 
 /* ── логика ── */
 function update(dt){
- let micTarget=0;
+ let micDbT=0;
  if(micOn&&analyser){analyser.getByteTimeDomainData(micBuf);let s=0;
   for(let i=0;i<micBuf.length;i+=4){const v=(micBuf[i]-128)/128;s+=v*v;}
-  const rms=Math.sqrt(s/(micBuf.length/4));micTarget=clamp(rms*4.6-0.04);}
- state.mic+=(micTarget-state.mic)*(micTarget>state.mic?Math.min(1,dt*22):Math.min(1,dt*6));
- const noiseFire=clamp((state.mic-0.05)/0.65)*100;
- if(state.mic>TH)state.wakeHold=Math.max(state.wakeHold,t+1.5);
- const awakeTarget=(state.mic>TH||state.slider>2||state.boost||state.wakeHold>t)?1:0;
+  const rms=Math.sqrt(s/(micBuf.length/4));
+  micDbT=Math.max(0,Math.min(DB_MAX,100+20*Math.log10(Math.max(rms,0.0001))));}
+ state.micDb+=(micDbT-state.micDb)*(micDbT>state.micDb?Math.min(1,dt*22):Math.min(1,dt*5));
+ const thr=state.thr;
+ const noiseFire=clamp((state.micDb-thr)/35)*100;   // огонь = насколько громче порога
+ if(state.micDb>thr)state.wakeHold=Math.max(state.wakeHold,t+1.5);
+ const awakeTarget=(state.micDb>thr||state.boost||state.wakeHold>t)?1:0;
  state.wake+=(awakeTarget-state.wake)*Math.min(1,(awakeTarget>state.wake?3.2:0.5)*dt);
  const w=state.wake,half=w>0.5;
  if(half&&!prevHalf)wakeEvent();
  if(!half&&prevHalf)sleepEvent();
  prevHalf=half;
  state.wing+=((w>0.4?1:0)-state.wing)*Math.min(1,(w>0.4?2.6:1.2)*dt);
- const tgt=clamp(w*Math.max(state.slider,state.boost?100:0,noiseFire))/100;
+ const tgt=clamp(w*Math.max(state.boost?100:0,noiseFire))/100;
  state.inten+=(tgt-state.inten)*Math.min(1,(tgt>state.inten?12:2.2)*dt);
  const jt=w>0.25?Math.max(0.1,state.inten):0;
  state.jaw+=(jt-state.jaw)*Math.min(1,dt*8);
@@ -340,8 +348,9 @@ function update(dt){
   if(s.age>s.tl)sparkles.splice(i,1);}
  for(let i=flyCoins.length-1;i>=0;i--){const f=flyCoins[i];f.age+=dt;
   if(f.age>0.75)flyCoins.splice(i,1);}
- noiseFill.style.width=(state.mic*100).toFixed(1)+'%';
- noiseFill.className=state.mic>TH?'hot':'';
+ noiseFill.style.width=(state.micDb/DB_MAX*100).toFixed(1)+'%';
+ noiseFill.className=state.micDb>thr?'hot':'';
+ noiseVal.textContent=Math.round(state.micDb);
  fireFill.style.width=(state.inten*100).toFixed(1)+'%';
  if(w<0.3){stateChip.textContent='😴 СПИТ';stateChip.className='chip sleep';}
  else if(w<0.75){stateChip.textContent='👁 ПРОСЫПАЕТСЯ…';stateChip.className='chip warn';}
@@ -573,7 +582,6 @@ function drawHead(g,hx,hy,tilt,hr,w,j){
  hg.addColorStop(0,'#ff9a4a');hg.addColorStop(.5,'#f5822e');hg.addColorStop(1,'#c85a14');
  const jawP={x:-hr*0.2,y:hr*0.2},jawAng=j*0.55;
  ctx.fillStyle='#6b2724';horn(hr,hr*0.3,-hr*0.05,0.85);
- // нижняя челюсть
  ctx.save();ctx.translate(jawP.x,jawP.y);ctx.rotate(jawAng);ctx.translate(-jawP.x,-jawP.y);
  ctx.fillStyle='#e06a1a';ctx.beginPath();
  ctx.moveTo(-hr*0.35,hr*0.12);ctx.quadraticCurveTo(-hr*1.1,hr*0.28,-hr*1.42,hr*0.4);
@@ -599,18 +607,15 @@ function drawHead(g,hx,hy,tilt,hr,w,j){
    ctx.fillStyle=fg;ctx.beginPath();ctx.moveTo(jawP.x,jawP.y);
    ctx.lineTo(-hr*1.42,hr*0.18);ctx.lineTo(lp.x,lp.y);ctx.closePath();ctx.fill();
    ctx.globalCompositeOperation='source-over';}}
- // череп
  ctx.fillStyle=hg;
  ellipse(0,0,hr*0.95,hr*0.82);
  ellipse(-hr*0.85,hr*0.05,hr*0.72,hr*0.42);
  ellipse(-hr*0.5,-hr*0.35,hr*0.55,hr*0.4);
- // гребешок из рожек
  ctx.fillStyle='#7d2b26';
  [[-hr*0.15,-hr*0.7,0.9],[hr*0.12,-hr*0.78,1],[hr*0.38,-hr*0.68,0.8]].forEach(([px,py,s])=>{
   ctx.beginPath();ctx.moveTo(px-hr*0.12,py+hr*0.15);
   ctx.quadraticCurveTo(px,py-hr*0.35*s,px+hr*0.18,py-hr*0.3*s);
   ctx.quadraticCurveTo(px+hr*0.1,py+hr*0.1,px+hr*0.14,py+hr*0.18);ctx.closePath();ctx.fill();});
- // кремовая морда
  const mz=ctx.createLinearGradient(0,-hr*0.1,0,hr*0.5);
  mz.addColorStop(0,'#ffe9c4');mz.addColorStop(1,'#e3b87e');
  ctx.fillStyle=mz;ellipse(-hr*0.9,hr*0.16,hr*0.7,hr*0.34);
