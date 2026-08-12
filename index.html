@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ЗЛАТОХРАП 3D — дракон на золоте</title>
+<title>ЗЛАТОХРАП 3D — спит / ярость</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
@@ -22,8 +22,7 @@
   .chip{font-family:Unbounded;font-weight:700;font-size:10px;padding:9px 12px;border-radius:8px;
     color:#e8c98a;background:rgba(26,15,7,.85);border:2px solid #5c4018;transition:.25s;white-space:nowrap}
   .chip.sleep{color:#bfe8d8;border-color:#2e5c50}
-  .chip.warn{color:#ffd873;border-color:#8a6a20}
-  .chip.rage{color:#ffb15e;border-color:#ff7a2e;box-shadow:0 0 16px rgba(255,110,30,.6);animation:pulse 1s infinite}
+  .chip.rage{color:#ffb15e;border-color:#ff7a2e;box-shadow:0 0 16px rgba(255,110,30,.6);animation:pulse .7s infinite}
   .chip.on{color:#ffe08a;border-color:#ff9d3d;box-shadow:0 0 14px rgba(255,140,40,.5)}
   @keyframes pulse{50%{box-shadow:0 0 26px rgba(255,110,30,.9)}}
 
@@ -93,7 +92,7 @@
 <header class="hud-top">
   <div class="brand">
     <h1>ЗЛАТО<b>ХРАП</b> 3D</h1>
-    <p class="tag">спит на золоте · звук выше порога — проснётся и обуглит</p>
+    <p class="tag">2 стадии: спит на золоте → разбудишь = ЯРОСТЬ + огонь</p>
   </div>
   <div class="chips">
     <span id="stateChip" class="chip sleep">😴 СПИТ</span>
@@ -104,7 +103,7 @@
 <section class="deck">
   <div class="deck-left">
     <div class="label-row">
-      <label for="lever">РЫЧАГ РЁВА · ПОРОГ, дБ</label>
+      <label for="lever">ПОРОГ ПРОБУЖДЕНИЯ, дБ</label>
       <output id="leverOut">65 дБ</output>
     </div>
     <input type="range" id="lever" min="30" max="100" value="65" aria-label="Порог пробуждения в децибелах">
@@ -117,9 +116,9 @@
   </div>
   <div class="deck-right">
     <button id="micBtn" class="pbtn">🎤 МИКРОФОН</button>
-    <button id="sndBtn" class="pbtn">🔊 ЗВУК</button>
+    <button id="sndBtn" class="pbtn on">🔊 ЗВУК</button>
   </div>
-  <p class="hint">шум громче порога будит дракона → рёв + огонь · <kbd>ПРОБЕЛ</kbd>/тап — принудительный залп</p>
+  <p class="hint">шум выше порога → ЯРОСТЬ: рёв + огонь · тап по дракону / <kbd>ПРОБЕЛ</kbd> — разбудить вручную · стихнет — уснёт</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -132,10 +131,10 @@ const lever=$('lever'),leverOut=$('leverOut'),noiseFill=$('noiseFill'),fireFill=
  thMark=$('thMark'),noiseVal=$('noiseVal');
 const DB_MAX=110;
 const clamp=x=>Math.max(0,Math.min(1,x)),lerp=(a,b,u)=>a+(b-a)*u,smooth=x=>x*x*(3-2*x),rnd=(a,b)=>a+Math.random()*(b-a);
+/* 2 стадии: wake 0 = СПИТ, wake 1 = ЯРОСТЬ */
 const state={thr:65,micDb:0,inten:0,boost:false,wake:0,wing:0,jaw:0,wakeHold:-1,breath:0};
 let shake=0,prevHalf=false,t=0;
 
-/* ── рычаг порога ── */
 function setThr(v){state.thr=+v;leverOut.textContent=v+' дБ';thMark.style.left=(v/DB_MAX*100)+'%';}
 lever.addEventListener('input',()=>setThr(lever.value));setThr(lever.value);
 
@@ -164,13 +163,12 @@ function roarSound(){if(!AC||!soundOn)return;try{
  const ct=AC.currentTime,o=AC.createOscillator(),g2=AC.createGain(),f=AC.createBiquadFilter();
  o.type='sawtooth';f.type='lowpass';f.frequency.value=850;f.Q.value=2;
  o.frequency.setValueAtTime(150,ct);o.frequency.exponentialRampToValueAtTime(36,ct+0.6);
- g2.gain.setValueAtTime(0.0001,ct);g2.gain.exponentialRampToValueAtTime(0.55,ct+0.05);
- g2.gain.exponentialRampToValueAtTime(0.0001,ct+0.7);
- o.connect(f);f.connect(g2);g2.connect(master);o.start(ct);o.stop(ct+0.75);}catch(e){}}
+ g2.gain.setValueAtTime(0.0001,ct);g2.gain.exponentialRampToValueAtTime(0.6,ct+0.05);
+ g2.gain.exponentialRampToValueAtTime(0.0001,ct+0.75);
+ o.connect(f);f.connect(g2);g2.connect(master);o.start(ct);o.stop(ct+0.8);}catch(e){}}
 sndBtn.addEventListener('click',()=>{try{initAudio();AC.resume();}catch(e){}
  soundOn=!soundOn;sndBtn.classList.toggle('on',soundOn);
  sndBtn.textContent=soundOn?'🔊 ЗВУК: ВКЛ':'🔇 ЗВУК: ВЫКЛ';sndBtn.blur();});
-sndBtn.classList.add('on');
 micBtn.addEventListener('click',async()=>{micBtn.blur();
  if(micOn){micStream&&micStream.getTracks().forEach(tr=>tr.stop());micOn=false;state.micDb=0;
   micBtn.classList.remove('on');micChip.classList.remove('on');micChip.textContent='🎤 выкл';return;}
@@ -181,15 +179,12 @@ micBtn.addEventListener('click',async()=>{micBtn.blur();
    analyser.fftSize=1024;micBuf=new Uint8Array(analyser.fftSize);s.connect(analyser);}
   micOn=true;micBtn.classList.add('on');micChip.classList.add('on');micChip.textContent='🎤 слушаю';
  }catch(e){micChip.textContent='🎤 нет доступа';}});
-addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();state.boost=true;state.wakeHold=t+1.2;
- try{initAudio();AC.resume();}catch(err){}}});
+addEventListener('keydown',e=>{if(e.code==='Space'&&!e.repeat){e.preventDefault();
+ state.boost=true;state.wakeHold=t+2;try{initAudio();AC.resume();}catch(err){}}});
 addEventListener('keyup',e=>{if(e.code==='Space')state.boost=false;});
-addEventListener('pointerup',()=>state.boost=false);
-addEventListener('pointerdown',()=>{state.boost=true;state.wakeHold=t+1.2;
- try{initAudio();AC.resume();}catch(e){}});
 
-/* ── всплывашки и Zzz ── */
-const WAKEW=['КТО ПОСМЕЛ?!','Р-Р-РАРРР!','ААААРХ!','МОЁ ЗОЛОТО!'];
+/* ── всплывашки / Zzz ── */
+const RAGE=['Р-Р-РАРРР!','КТО ПОСМЕЛ?!','ААААРХ!','ГОРРРИ!','МОЁ ЗОЛОТО!'];
 const pick=a=>a[(Math.random()*a.length)|0];
 function popup(text,x,y,cls){const el=document.createElement('div');el.className='popup '+(cls||'');
  el.textContent=text;el.style.setProperty('--rot',rnd(-8,8)+'deg');
@@ -199,7 +194,7 @@ function spawnZzz(x,y){const el=document.createElement('div');el.className='zzz'
  el.style.fontSize=rnd(14,26)+'px';el.style.left=x+'px';el.style.top=y+'px';
  document.body.appendChild(el);setTimeout(()=>el.remove(),2800);}
 
-/* ═══ THREE.JS СЦЕНА ═══ */
+/* ═══ THREE ═══ */
 let W=innerWidth,H=innerHeight;
 const renderer=new THREE.WebGLRenderer({canvas:$('scene'),antialias:true});
 renderer.setPixelRatio(Math.min(2,devicePixelRatio||1));
@@ -211,7 +206,6 @@ scene.fog=new THREE.Fog(0x120a08,9,24);
 const camera=new THREE.PerspectiveCamera(45,W/H,0.1,60);
 camera.position.set(0,2.6,8.4);
 
-/* свет */
 scene.add(new THREE.HemisphereLight(0x3a2a4f,0x2a1608,0.55));
 const moon=new THREE.DirectionalLight(0x9fd8ff,0.5);
 moon.position.set(-4,7,4);moon.castShadow=true;
@@ -219,9 +213,8 @@ moon.shadow.mapSize.set(1024,1024);
 moon.shadow.camera.left=-6;moon.shadow.camera.right=6;moon.shadow.camera.top=6;moon.shadow.camera.bottom=-6;
 scene.add(moon);
 const goldLight=new THREE.PointLight(0xffaa33,1.1,12,2);goldLight.position.set(0,1.8,1.6);scene.add(goldLight);
-const fireLight=new THREE.PointLight(0xff6a1c,0,9,2);scene.add(fireLight);
+const fireLight=new THREE.PointLight(0xff6a1c,0,10,2);scene.add(fireLight);
 
-/* материалы */
 const M={
  orange:new THREE.MeshStandardMaterial({color:0xf5822e,roughness:0.55}),
  cream:new THREE.MeshStandardMaterial({color:0xf7ddb0,roughness:0.6}),
@@ -234,7 +227,6 @@ const M={
  ground:new THREE.MeshStandardMaterial({color:0x241511,roughness:1}),
  mouth:new THREE.MeshStandardMaterial({color:0x5c1010,roughness:0.8})};
 
-/* пещера и пол */
 const ground=new THREE.Mesh(new THREE.CircleGeometry(16,32),M.ground);
 ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
 for(let i=0;i<7;i++){
@@ -243,7 +235,6 @@ for(let i=0;i<7;i++){
  r.position.set(Math.sin(a)*d,rnd(0.4,1.4),-Math.abs(Math.cos(a))*d+2);
  r.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3));scene.add(r);}
 
-/* куча золота + монеты */
 const pile=new THREE.Mesh(new THREE.SphereGeometry(2.7,28,18),M.pile);
 pile.scale.set(1,0.5,1);pile.position.y=0.05;pile.castShadow=true;pile.receiveShadow=true;scene.add(pile);
 {
@@ -256,12 +247,10 @@ pile.scale.set(1,0.5,1);pile.position.y=0.05;pile.castShadow=true;pile.receiveSh
    if(r2>2.5*2.5)continue;
    const y=0.5*Math.sqrt(Math.max(0.2,2.7*2.7-r2))+rnd(-0.05,0.1);
    if(y<0.2)continue;
-   d.position.set(x,y,z);
-   d.rotation.set(rnd(-0.5,0.5),rnd(0,3),rnd(-0.5,0.5));
+   d.position.set(x,y,z);d.rotation.set(rnd(-0.5,0.5),rnd(0,3),rnd(-0.5,0.5));
   }else{
    const a=rnd(0,Math.PI*2),dd=rnd(2.7,3.6);
-   d.position.set(Math.sin(a)*dd,0.03,Math.cos(a)*dd);
-   d.rotation.set(0,rnd(0,3),0);}
+   d.position.set(Math.sin(a)*dd,0.03,Math.cos(a)*dd);d.rotation.set(0,rnd(0,3),0);}
   d.updateMatrix();inst.setMatrixAt(i++,d.matrix);}
  inst.instanceMatrix.needsUpdate=true;inst.castShadow=true;scene.add(inst);
  [[-1.6,1.0,0.9,0x4de0c0],[1.8,0.8,1.2,0xff6a8a],[0.4,1.35,-0.6,0x7ab8ff]].forEach(([x,y,z,c])=>{
@@ -278,98 +267,98 @@ function mesh(geo,mat,x,y,z,parent,sx,sy,sz){
  m.castShadow=true;(parent||dragon).add(m);return m;}
 const S=new THREE.SphereGeometry(1,20,16);
 
-/* тело */
 const body=mesh(S,M.orange,0,0,0,null,1.06,0.81,0.77);
 mesh(S,M.cream,0.12,-0.28,0,null,0.85,0.6,0.66);
-/* ноги */
 [[0.62,-0.62,0.5],[-0.78,-0.6,0.56]].forEach(p=>{[1,-1].forEach(s=>{
  mesh(S,M.orange,p[0],p[1],s*p[2],null,0.26,0.24,0.24);
  mesh(S,M.orange,p[0]+0.28,p[1]-0.12,s*p[2],null,0.2,0.16,0.22);
  for(let c=0;c<3;c++){
   const cl=mesh(new THREE.ConeGeometry(0.05,0.18,8),M.claw,p[0]+0.5,p[1]-0.16,s*p[2]+(c-1)*0.09);
   cl.rotation.z=-Math.PI/2;}});});
-/* хвост */
 const tailGroup=new THREE.Group();dragon.add(tailGroup);
 for(let i=0;i<12;i++){
- const u=i/11;
- mesh(S,M.orange,-0.95-i*0.17,-0.05-Math.sin(u*2.2)*0.25-i*0.015,Math.sin(i*0.5)*0.3*u,tailGroup,
-  0.3*(1-u*0.8)+0.05,0.28*(1-u*0.8)+0.05,0.28*(1-u*0.8)+0.05);
+ const u=i/11,r=0.3*(1-u*0.8)+0.05;
+ mesh(S,M.orange,-0.95-i*0.17,-0.05-Math.sin(u*2.2)*0.25-i*0.015,Math.sin(i*0.5)*0.3*u,tailGroup,r,r*0.9,r*0.9);
  if(i%3===1&&i<8){const sp=mesh(new THREE.ConeGeometry(0.07,0.26,8),M.horn,
   -0.95-i*0.17,0.22-Math.sin(u*2.2)*0.25-i*0.015,Math.sin(i*0.5)*0.3*u,tailGroup);
   sp.rotation.z=Math.PI;}}
-/* шипы на спине */
 for(let i=0;i<7;i++){
  const x=0.85-i*0.3,y=0.62*Math.sqrt(Math.max(0.08,1-(x/1.15)*(x/1.15)))+0.1;
- const sp=mesh(new THREE.ConeGeometry(0.09,0.36,8),M.horn,x,y,0);
- sp.rotation.z=-0.25;}
-/* крылья */
+ const sp=mesh(new THREE.ConeGeometry(0.09,0.36,8),M.horn,x,y,0);sp.rotation.z=-0.25;}
 function wingShape(){const s=new THREE.Shape();
  s.moveTo(0,0);s.quadraticCurveTo(0.35,0.55,0.55,0.95);s.quadraticCurveTo(1.1,1.25,1.7,1.15);
  s.quadraticCurveTo(1.25,0.75,1.15,0.55);s.quadraticCurveTo(1.7,0.45,1.95,0.1);
  s.quadraticCurveTo(1.3,0.05,1.1,-0.05);s.quadraticCurveTo(1.45,-0.35,1.5,-0.75);
  s.quadraticCurveTo(0.8,-0.45,0.25,-0.3);s.closePath();return s;}
 const wingGeo=new THREE.ShapeGeometry(wingShape());
-function makeWing(side){ /* side=1 лево, -1 право */
- const g=new THREE.Group();g.position.set(-0.15,0.5,side*0.5);
+function makeWing(side){const g=new THREE.Group();g.position.set(-0.15,0.5,side*0.5);
  const m=new THREE.Mesh(wingGeo,M.wing);m.rotation.y=-side*Math.PI/2;m.castShadow=true;
  g.add(m);dragon.add(g);return g;}
 const wingL=makeWing(1),wingR=makeWing(-1);
-/* голова */
 const headGroup=new THREE.Group();headGroup.position.set(1.05,0.1,0);dragon.add(headGroup);
 mesh(S,M.orange,0,0,0,headGroup,0.55,0.5,0.5);
 mesh(S,M.orange,0.5,-0.08,0,headGroup,0.44,0.27,0.34);
 mesh(S,M.cream,0.52,-0.16,0,headGroup,0.4,0.16,0.28);
-mesh(S,M.horn,-0.78,0.02,0.12,headGroup,0.03,0.03,0.03);
-mesh(S,M.horn,-0.78,0.02,-0.12,headGroup,0.03,0.03,0.03);
+mesh(S,M.horn,0.78,0.02,0.12,headGroup,0.03);mesh(S,M.horn,0.78,0.02,-0.12,headGroup,0.03);
 [[-0.05,0.45,0.26,0.5],[-0.05,0.45,-0.26,0.5],[0.25,0.5,0,0.35]].forEach(h=>{
  const hr=mesh(new THREE.ConeGeometry(0.09,h[3],10),M.horn,h[0],h[1],h[2],headGroup);
  hr.rotation.z=h[2]>0?-0.5:(h[2]<0?0.5:0);hr.rotation.x=h[2]*0.6;});
-/* глаза: закрытые / открытые */
+const eyeMat=new THREE.MeshStandardMaterial({color:0xffcf3e,emissive:0x994400,emissiveIntensity:0.6});
 const closedEyes=[],openEyes=[];
 [1,-1].forEach(s=>{
  const c=new THREE.Mesh(new THREE.TorusGeometry(0.11,0.022,8,16,Math.PI),
   new THREE.MeshStandardMaterial({color:0x5c2a1a}));
- c.position.set(0.34,0.1,s*0.47);c.rotation.y=s*Math.PI/2;c.rotation.z=0;
- headGroup.add(c);closedEyes.push(c);
+ c.position.set(0.34,0.1,s*0.47);c.rotation.y=s*Math.PI/2;headGroup.add(c);closedEyes.push(c);
  const og=new THREE.Group();og.position.set(0.34,0.1,s*0.45);
- const wb=new THREE.Mesh(S,new THREE.MeshStandardMaterial({color:0xffcf3e,emissive:0x994400,emissiveIntensity:0.6}));
- wb.scale.setScalar(0.12);
+ const wb=new THREE.Mesh(S,eyeMat);wb.scale.setScalar(0.12);
  const pu=new THREE.Mesh(S,new THREE.MeshStandardMaterial({color:0x150b02}));
  pu.scale.set(0.05,0.09,0.05);pu.position.set(0.06,0,s*0.09);
  og.add(wb);og.add(pu);og.visible=false;headGroup.add(og);openEyes.push(og);});
-/* пасть */
-const mouthIn=mesh(S,M.mouth,0.5,-0.28,0,headGroup,0.3,0.22,0.26);
+mesh(S,M.mouth,0.5,-0.28,0,headGroup,0.3,0.22,0.26);
 const jawGroup=new THREE.Group();jawGroup.position.set(0.15,-0.28,0);headGroup.add(jawGroup);
 mesh(S,M.orange,0.28,-0.06,0,jawGroup,0.4,0.14,0.3);
 const mouthAnchor=new THREE.Object3D();mouthAnchor.position.set(0.85,-0.15,0);headGroup.add(mouthAnchor);
+/* тап по дракону = разбудить */
+renderer.domElement.addEventListener('pointerdown',()=>{state.boost=true;state.wakeHold=t+2;
+ try{initAudio();AC.resume();}catch(e){}});
+addEventListener('pointerup',()=>state.boost=false);
 
-/* ═══ ОГОНЬ ═══ */
+/* ═══ ОГОНЬ (исправлено) ═══ */
 const softTex=(()=>{const c=document.createElement('canvas');c.width=c.height=64;
  const g=c.getContext('2d'),gr=g.createRadialGradient(32,32,2,32,32,30);
  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(1,'rgba(255,255,255,0)');
  g.fillStyle=gr;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c);})();
-const PMAX=600;
+const PMAX=700;
 const pGeo=new THREE.BufferGeometry();
 const pPos=new Float32Array(PMAX*3),pCol=new Float32Array(PMAX*3);
 pPos.fill(-999);
 pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
 pGeo.setAttribute('color',new THREE.BufferAttribute(pCol,3));
-const points=new THREE.Points(pGeo,new THREE.PointsMaterial({size:0.4,map:softTex,vertexColors:true,
+const points=new THREE.Points(pGeo,new THREE.PointsMaterial({size:0.55,map:softTex,vertexColors:true,
  blending:THREE.AdditiveBlending,depthWrite:false,transparent:true}));
+points.frustumCulled=false;               /* ← FIX: частицы больше не прячутся */
 scene.add(points);
-const pVel=new Float32Array(PMAX*3),pLife=new Float32Array(PMAX),pMax=new Float32Array(PMAX);
+const pVel=new Float32Array(PMAX*3),pLife=new Float32Array(PMAX).fill(-1),pMax=new Float32Array(PMAX);
 let pCur=0;
-const flameMat=new THREE.MeshBasicMaterial({color:0xff8a1e,transparent:true,opacity:0.8,
- blending:THREE.AdditiveBlending,depthWrite:false});
-const flameGeo=new THREE.ConeGeometry(0.32,1,12,1,true);flameGeo.translate(0,0.5,0);
-const flame=new THREE.Mesh(flameGeo,flameMat);flame.visible=false;scene.add(flame);
-const flame2=new THREE.Mesh(flameGeo,new THREE.MeshBasicMaterial({color:0xfff0b0,transparent:true,
- opacity:0.9,blending:THREE.AdditiveBlending,depthWrite:false}));
-flame2.visible=false;scene.add(flame2);
+const flameGeo=new THREE.ConeGeometry(0.34,1,12,1,true);flameGeo.translate(0,0.5,0);
+const flame=new THREE.Mesh(flameGeo,new THREE.MeshBasicMaterial({color:0xff7a14,transparent:true,opacity:0.75,
+ blending:THREE.AdditiveBlending,depthWrite:false}));
+flame.visible=false;flame.frustumCulled=false;scene.add(flame);
+const flame2=new THREE.Mesh(flameGeo,new THREE.MeshBasicMaterial({color:0xffd23e,transparent:true,opacity:0.85,
+ blending:THREE.AdditiveBlending,depthWrite:false}));
+flame2.visible=false;flame2.frustumCulled=false;scene.add(flame2);
+const flame3=new THREE.Mesh(flameGeo,new THREE.MeshBasicMaterial({color:0xfff6c8,transparent:true,opacity:0.95,
+ blending:THREE.AdditiveBlending,depthWrite:false}));
+flame3.visible=false;flame3.frustumCulled=false;scene.add(flame3);
+const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:softTex,color:0xff9a3e,
+ blending:THREE.AdditiveBlending,depthWrite:false,transparent:true}));
+glow.visible=false;scene.add(glow);
 
-/* ── логика и цикл ── */
+/* ── логика 2 стадий ── */
 const headWorld=new THREE.Vector3(),fireDir=new THREE.Vector3(),q=new THREE.Quaternion(),UP=new THREE.Vector3(0,1,0);
 let last=performance.now(),zzzAt=0;
+function screenOf(obj){const v=new THREE.Vector3();obj.getWorldPosition(v);v.project(camera);
+ return[(v.x*0.5+0.5)*W,(-v.y*0.5+0.5)*H];}
 function update(dt){
  let micDbT=0;
  if(micOn&&analyser){analyser.getByteTimeDomainData(micBuf);let s=0;
@@ -377,37 +366,34 @@ function update(dt){
   const rms=Math.sqrt(s/(micBuf.length/4));
   micDbT=Math.max(0,Math.min(DB_MAX,100+20*Math.log10(Math.max(rms,0.0001))));}
  state.micDb+=(micDbT-state.micDb)*(micDbT>state.micDb?Math.min(1,dt*22):Math.min(1,dt*5));
- const thr=state.thr,noiseFire=clamp((state.micDb-thr)/35)*100;
- if(state.micDb>thr)state.wakeHold=Math.max(state.wakeHold,t+1.5);
- const awakeTarget=(state.micDb>thr||state.boost||state.wakeHold>t)?1:0;
- state.wake+=(awakeTarget-state.wake)*Math.min(1,(awakeTarget>state.wake?3.2:0.5)*dt);
+ const loud=state.micDb>state.thr;
+ if(loud)state.wakeHold=Math.max(state.wakeHold,t+1.6);
+ const target=(loud||state.boost||state.wakeHold>t)?1:0;
+ state.wake+=(target-state.wake)*Math.min(1,(target>state.wake?3.5:0.45)*dt);
  const w=state.wake,half=w>0.5;
- if(half&&!prevHalf){shake=1;roarSound();
-  const v=headGroup.getWorldPosition(headWorld.clone()).project(camera);
-  popup(pick(WAKEW),(v.x*0.5+0.5)*W,(-v.y*0.5+0.5)*H-60,'');}
- if(!half&&prevHalf){const v=headGroup.getWorldPosition(headWorld.clone()).project(camera);
-  popup('хррр-хррр…',(v.x*0.5+0.5)*W,(-v.y*0.5+0.5)*H-40,'quiet');}
+ if(half&&!prevHalf){shake=1;roarSound();state.wakeHold=Math.max(state.wakeHold,t+2.5);
+  const[x,y]=screenOf(headGroup);popup(pick(RAGE),x,y-70,'angry');}
+ if(!half&&prevHalf){const[x,y]=screenOf(headGroup);popup('хррр-хррр…',x,y-40,'quiet');}
  prevHalf=half;
- state.wing+=((w>0.4?1:0)-state.wing)*Math.min(1,(w>0.4?2.6:1.2)*dt);
- const tgt=clamp(w*Math.max(state.boost?100:0,noiseFire))/100;
- state.inten+=(tgt-state.inten)*Math.min(1,(tgt>state.inten?12:2.2)*dt);
- state.jaw+=((w>0.25?Math.max(0.12,state.inten):0)-state.jaw)*Math.min(1,dt*8);
- state.breath+=dt*(w>0.5?5.4:1.5);
- shake=Math.max(0,shake-dt*1.3);
+ state.wing+=((half?1:0)-state.wing)*Math.min(1,(half?2.6:1.2)*dt);
+ /* ЯРОСТЬ = огонь на полную, независимо от громкости */
+ const ft=half?1:0;
+ state.inten+=(ft-state.inten)*Math.min(1,(ft>state.inten?3:1.6)*dt);
+ state.jaw+=((half?0.75:0)-state.jaw)*Math.min(1,dt*6);
+ state.breath+=dt*(half?5.4:1.5);
+ shake=Math.max(0,shake-dt*1.1);
  /* HUD */
  noiseFill.style.width=(state.micDb/DB_MAX*100).toFixed(1)+'%';
- noiseFill.className=state.micDb>thr?'hot':'';
+ noiseFill.className=loud?'hot':'';
  noiseVal.textContent=Math.round(state.micDb);
- fireFill.style.width=(state.inten*100).toFixed(1)+'%';
- if(w<0.3){stateChip.textContent='😴 СПИТ';stateChip.className='chip sleep';}
- else if(w<0.75){stateChip.textContent='👁 ПРОСЫПАЕТСЯ…';stateChip.className='chip warn';}
- else if(state.inten>0.45){stateChip.textContent='🔥 ЯРОСТЬ';stateChip.className='chip rage';}
- else{stateChip.textContent='🐲 НЕ СПИТ';stateChip.className='chip warn';}
- if(AC){const ct=AC.currentTime,on=soundOn?1:0;
-  fireGain.gain.setTargetAtTime(on*w*Math.pow(state.inten,1.5)*0.55,ct,0.08);
-  fireFilter.frequency.setTargetAtTime(300+state.inten*1100,ct,0.1);
-  growlGain.gain.setTargetAtTime(on*w*Math.pow(state.inten,1.3)*0.4,ct,0.09);
-  growlOsc.frequency.setTargetAtTime(42+state.inten*60,ct,0.1);
+ fireFill.style.width=(state.inten*100).toFixed(0)+'%';
+ if(half){stateChip.textContent='🔥 ЯРОСТЬ';stateChip.className='chip rage';}
+ else{stateChip.textContent='😴 СПИТ';stateChip.className='chip sleep';}
+ if(AC){const ct=AC.currentTime,on=soundOn?1:0,I=state.inten;
+  fireGain.gain.setTargetAtTime(on*w*Math.pow(I,1.5)*0.6,ct,0.08);
+  fireFilter.frequency.setTargetAtTime(300+I*1100,ct,0.1);
+  growlGain.gain.setTargetAtTime(on*w*(0.25+Math.pow(I,1.3)*0.35),ct,0.09);
+  growlOsc.frequency.setTargetAtTime(42+I*60,ct,0.1);
   snGain.gain.setTargetAtTime(on*(1-w)*0.085*Math.max(0,Math.sin(state.breath)),ct,0.12);}}
 
 function animate(now){
@@ -415,62 +401,66 @@ function animate(now){
  const dt=Math.min(0.05,(now-last)/1000);last=now;t+=dt;
  update(dt);
  const w=smooth(state.wake),wo=smooth(state.wing),I=state.inten;
- /* поза дракона */
  const br=Math.sin(state.breath)*(0.03*(1-w)+0.015*w);
  body.scale.set(1.06,0.81*(1+br),0.77);
  headGroup.position.set(lerp(1.0,1.3,w),lerp(0.05,0.8,w),0);
  headGroup.rotation.z=lerp(0.32,-0.12,w)-state.jaw*0.15;
  closedEyes.forEach(e=>e.visible=w<0.5);
  openEyes.forEach(e=>{e.visible=w>=0.35;e.scale.setScalar(0.5+0.5*w);});
- jawGroup.rotation.z=-state.jaw*0.55;
+ eyeMat.emissiveIntensity=0.6+I*1.6;
+ jawGroup.rotation.z=-state.jaw*0.55-Math.max(0,Math.sin(t*26))*0.12*I;
  tailGroup.rotation.y=Math.sin(t*(1.2+w*2.5))*0.14;
- const flap=Math.sin(t*7)*0.3*wo;
- wingL.rotation.set(lerp(1.2,-0.3+flap,wo),lerp(0.5,0.12,wo),0);
- wingR.rotation.set(-lerp(1.2,-0.3+flap,wo),-lerp(0.5,0.12,wo),0);
+ const flap=Math.sin(t*8)*0.35*wo;
+ wingL.rotation.set(lerp(1.2,-0.35+flap,wo),lerp(0.5,0.12,wo),0);
+ wingR.rotation.set(-lerp(1.2,-0.35+flap,wo),-lerp(0.5,0.12,wo),0);
  wingL.scale.setScalar(lerp(0.72,1,wo));wingR.scale.setScalar(lerp(0.72,1,wo));
- /* свет */
- goldLight.intensity=1.1+I*1.4+Math.sin(t*9)*0.08;
+ goldLight.intensity=1.1+I*1.6+Math.sin(t*9)*0.08;
  /* огонь */
  headGroup.updateWorldMatrix(true,false);
  mouthAnchor.getWorldPosition(headWorld);
  headGroup.getWorldQuaternion(q);
- fireDir.set(1,-0.06,0).applyQuaternion(q).normalize();
- fireLight.position.copy(headWorld).addScaledVector(fireDir,0.6);
- fireLight.intensity=I*3;
- const showF=I>0.02;
- flame.visible=flame2.visible=showF;
+ fireDir.set(1,0.1,0).applyQuaternion(q).normalize();
+ fireLight.position.copy(headWorld).addScaledVector(fireDir,0.8);
+ fireLight.intensity=I*4;
+ const showF=I>0.04;
+ flame.visible=flame2.visible=flame3.visible=glow.visible=showF;
  if(showF){
-  const len=0.6+I*3.4,wob=0.5+I*0.9+Math.sin(t*40)*0.08;
-  [flame,flame2].forEach((f,ix)=>{
-   f.position.copy(headWorld);
-   f.quaternion.setFromUnitVectors(UP,fireDir);
-   f.scale.set(wob*(ix?0.5:1),len*(ix?0.7:1),wob*(ix?0.5:1));
-   f.rotation.y=t*3;});}
- /* частицы */
- if(showF){
-  let n=Math.floor(220*I*dt+Math.random());
+  const len=0.8+I*3.6,wob=(0.55+I*0.85)*(0.9+Math.sin(t*42)*0.12);
+  const Q=new THREE.Quaternion().setFromUnitVectors(UP,fireDir);
+  flame.position.copy(headWorld);flame.quaternion.copy(Q);
+  flame.scale.set(wob,len,wob);
+  flame2.position.copy(headWorld);flame2.quaternion.copy(Q);
+  flame2.scale.set(wob*0.6,len*0.8,wob*0.6);
+  flame3.position.copy(headWorld);flame3.quaternion.copy(Q);
+  flame3.scale.set(wob*0.3,len*0.55,wob*0.3);
+  glow.position.copy(headWorld);glow.scale.setScalar(1.2+I*2+Math.sin(t*30)*0.2);
+  /* частицы */
+  let n=Math.floor(320*I*dt+Math.random()*0.9);
   while(n-->0){
    const i=pCur;pCur=(pCur+1)%PMAX;
-   pPos[i*3]=headWorld.x+rnd(-0.08,0.08);pPos[i*3+1]=headWorld.y+rnd(-0.08,0.08);pPos[i*3+2]=headWorld.z+rnd(-0.08,0.08);
-   const sp=(2.5+rnd(0,2.5))*(0.6+I);
-   pVel[i*3]=fireDir.x*sp+rnd(-0.5,0.5);pVel[i*3+1]=fireDir.y*sp+rnd(-0.5,0.5);pVel[i*3+2]=fireDir.z*sp+rnd(-0.5,0.5);
-   pLife[i]=0;pMax[i]=rnd(0.35,0.8);}}
+   pPos[i*3]=headWorld.x+rnd(-0.1,0.1);pPos[i*3+1]=headWorld.y+rnd(-0.1,0.1);pPos[i*3+2]=headWorld.z+rnd(-0.1,0.1);
+   const sp=(3+rnd(0,3.5))*(0.5+I);
+   pVel[i*3]=fireDir.x*sp+rnd(-0.7,0.7);
+   pVel[i*3+1]=fireDir.y*sp+rnd(-0.7,0.7);
+   pVel[i*3+2]=fireDir.z*sp+rnd(-0.7,0.7);
+   pLife[i]=0;pMax[i]=rnd(0.4,0.9);}
+ }
  for(let i=0;i<PMAX;i++){
   if(pLife[i]<0)continue;
   pLife[i]+=dt;
   const u=pLife[i]/pMax[i];
   if(u>=1){pLife[i]=-1;pPos[i*3+1]=-999;pCol[i*3]=pCol[i*3+1]=pCol[i*3+2]=0;continue;}
-  pPos[i*3]+=pVel[i*3]*dt;pPos[i*3+1]+=(pVel[i*3+1]+1.2*pLife[i])*dt;pPos[i*3+2]+=pVel[i*3+2]*dt;
-  const f=(1-u);
-  pCol[i*3]=f;pCol[i*3+1]=f*(0.75-u*0.55);pCol[i*3+2]=f*(0.3-u*0.25);}
+  pPos[i*3]+=pVel[i*3]*dt;
+  pPos[i*3+1]+=(pVel[i*3+1]+1.5*pLife[i])*dt;
+  pPos[i*3+2]+=pVel[i*3+2]*dt;
+  const f=1-u;
+  pCol[i*3]=f;pCol[i*3+1]=f*Math.max(0,0.75-u*0.6);pCol[i*3+2]=f*Math.max(0,0.3-u*0.3);}
  pGeo.attributes.position.needsUpdate=true;
  pGeo.attributes.color.needsUpdate=true;
- /* Zzz */
- if(w<0.2&&t>zzzAt){zzzAt=t+1.4;
-  const v=headGroup.getWorldPosition(new THREE.Vector3()).project(camera);
-  spawnZzz((v.x*0.5+0.5)*W+30,(-v.y*0.5+0.5)*H-20);}
- /* камера */
- const sh=shake*0.12+(I>0.7?(I-0.7)*0.15:0);
+ /* Zzz во сне */
+ if(w<0.2&&t>zzzAt){zzzAt=t+1.4;const[x,y]=screenOf(headGroup);spawnZzz(x+34,y-16);}
+ /* камера + тряска в ярости */
+ const sh=shake*0.14+I*w*0.06;
  camera.position.x=Math.sin(t*0.1)*0.35+(Math.random()-0.5)*sh;
  camera.position.y=2.6+Math.sin(t*0.13)*0.15+(Math.random()-0.5)*sh;
  camera.lookAt(0.4,1.7,0);
